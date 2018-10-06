@@ -47,6 +47,22 @@
     (thunk (equal? (read) (sha512 (string->bytes/utf-8 password))))
   ))
 
+(define (read-css username)
+  (with-handlers ([exn:fail:filesystem?
+                    (lambda (exn)
+                      (erro "unable to read file")
+                      "")])
+    (file->string (build-path username "css")))
+  )
+
+(define (read-js username)
+  (with-handlers ([exn:fail:filesystem?
+                    (lambda (exn)
+                      (erro "unable to read file")
+                      "")])
+    (file->string (build-path username "js")))
+  )
+
 (define (create-or-fetch-session-key username)
   (define path (build-path username "session"))
   (cond
@@ -103,14 +119,24 @@
   (define from (hash-ref entry 'from #f))
   (define to (hash-ref entry 'to #f))
   `(p ,(seconds->datestring from) " - " ,(seconds->datestring to) ": " ,description
-      " " (a ([href ,(path->string file)]) "invite")
-      (a ([href ,(path->string file)]) "delete")
+      " " (a ([href ,(string-append "/invite/" (path->string file))]) "invite")
+      (a ([href ,(string-append "/delete/" (path->string file))]) "delete")
       )
   )
 
 (define (current-year)
   (define now (seconds->date (current-seconds)))
   (date-year now)
+  )
+
+(define (current-month)
+  (define now (seconds->date (current-seconds)))
+  (date-month now)
+  )
+
+(define (current-day)
+  (define now (seconds->date (current-seconds)))
+  (date-day now)
   )
 
 (define (current-week)

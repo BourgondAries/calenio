@@ -11,7 +11,7 @@
   racket/bool (only-in racket/date date-display-format
                                    date->seconds
                                    date*->seconds)
-  racket/file racket/function racket/list racket/string
+  racket/file racket/format racket/function racket/list racket/string
   web-server/dispatch
   web-server/servlet
   web-server/servlet-env)
@@ -89,7 +89,7 @@
     `(html
        ,(common-head)
        (body
-         (p "Welcome to calenio")
+         (p "Create a new account")
          (form ([action "/new-account"] [method "post"])
            (input ([name "username"] [placeholder "username"] [type "text"]))
            (input ([name "password"] [placeholder "password"] [type "password"]))
@@ -137,9 +137,15 @@
     [else
      ; (redirect-to <site> #:headers (list (cookie->header <your cookie>)) temporarily|permanent)
      (create-user username password)
+     (define session (create-or-fetch-session-key username))
+     (with-output-to-file (build-path username "css")
+       (thunk (displayln ".navbar a { padding-right: 1em; }")))
+     (with-output-to-file (build-path username "js")
+       (thunk (displayln "")))
      (response/xexpr
            #:preamble #"<!DOCTYPE html>"
-           #:headers (list (cookie->header (make-cookie "username" username)))
+           #:headers (list (cookie->header (make-cookie "username" username))
+                           (cookie->header (make-cookie "session" session)))
            `(html
               ,(common-head)
               (body (p "account made")
@@ -147,26 +153,31 @@
                     (a ([href ,(url index-page)]) "back to new user"))))]
   ))
 
+(define (menu req)
+  (define username (logged-in? req))
+  `((div ([class "navbar"])
+    ,(log-out-button req)
+    ,(if (= (current-week) 0)
+      `(a ([href ,(url user-page-specific username 52 (sub1 (current-year)))]) "<<")
+      `(a ([href ,(url user-page-specific username (sub1 (current-week)))]) "<<"))
+    (a ([href ,(url user-page username)]) "now")
+    ,(if (= (current-week) 52)
+      `(a ([href ,(url user-page-specific username 0 (add1 (current-year)))]) ">>")
+      `(a ([href ,(url user-page-specific username (add1 (current-week)))]) ">>"))
+    (a ([href ,(url add-entry)]) "add")
+    (a ([href ,(url settings-page)]) "settings"))))
+
 (define (user-page req ar)
   (cond
     [(logged-in? req)
      (response/xexpr
        `(html
           (head
-            (style "a { padding-right: 1em; }")
+            (style ,(read-css (logged-in? req)) )
             )
           (body
-            ,(log-out-button req)
-            ,(if (= (current-week) 0)
-              `(a ([href ,(url user-page-specific ar 52 (sub1 (current-year)))]) "<<")
-              `(a ([href ,(url user-page-specific ar (sub1 (current-week)))]) "<<"))
-            (a ([href ,(url user-page ar)]) "now")
-            ,(if (= (current-week) 52)
-              `(a ([href ,(url user-page-specific ar 0 (add1 (current-year)))]) ">>")
-              `(a ([href ,(url user-page-specific ar (add1 (current-week)))]) ">>"))
-            (a ([href ,(url add-entry)]) "add")
-            (a ([href ,(url settings-page)]) "settings")
-            ,@(generate-user-page req ar)
+            ,@(menu req)
+            (div ([class "content"]) ,@(generate-user-page req ar))
             )))]
     [else
       (redirect-to (url index-page))]))
@@ -177,24 +188,25 @@
      (response/xexpr
        `(html
           (head
-            (style "a { padding-right: 1em; }")
+            (style ,(read-css (logged-in? req)) )
             )
           (body
-            ,(log-out-button req)
-            ,(if (= n 0)
-              `(a ([href ,(url user-page-specific ar 52 (sub1 year))]) "<<")
-              (if (= (current-year) year)
-                `(a ([href ,(url user-page-specific ar (sub1 n))]) "<<")
-                `(a ([href ,(url user-page-specific ar (sub1 n) year)]) "<<")))
-            (a ([href ,(url user-page ar)]) "now")
-            ,(if (> (add1 n) 52)
-              `(a ([href ,(url user-page-specific ar 0 (add1 year))]) ">>")
-              (if (= (current-year) year)
-                `(a ([href ,(url user-page-specific ar (add1 n))]) ">>")
-                `(a ([href ,(url user-page-specific ar (add1 n) year)]) ">>")))
-            (a ([href ,(url add-entry)]) "add")
-            (a ([href ,(url settings-page)]) "settings")
-            ,@(generate-user-page req ar n year)
+            (div ([class "navbar"])
+              ,(log-out-button req)
+              ,(if (= n 0)
+                `(a ([href ,(url user-page-specific ar 52 (sub1 year))]) "<<")
+                (if (= (current-year) year)
+                  `(a ([href ,(url user-page-specific ar (sub1 n))]) "<<")
+                  `(a ([href ,(url user-page-specific ar (sub1 n) year)]) "<<")))
+              (a ([href ,(url user-page ar)]) "now")
+              ,(if (> (add1 n) 52)
+                `(a ([href ,(url user-page-specific ar 0 (add1 year))]) ">>")
+                (if (= (current-year) year)
+                  `(a ([href ,(url user-page-specific ar (add1 n))]) ">>")
+                  `(a ([href ,(url user-page-specific ar (add1 n) year)]) ">>")))
+              (a ([href ,(url add-entry)]) "add")
+              (a ([href ,(url settings-page)]) "settings"))
+            (div ([class "content"]) ,@(generate-user-page req ar n year))
             )))]
     [else
       (redirect-to (url index-page))]))
@@ -234,8 +246,9 @@
          (h1 "What is Calenio?")
          (p "Calenio is a calendar application.")
          (h2 "What distinguishes Calenio from other services?")
-         (p "Calenio is minimal and lets the user choose the visuals. Unlike most heavy calendar applications, Calenio offers a simple list of text. This makes Calenio very fast.")
-         (p "In addition to this, Calenio offers a simple and extendable user interface and API.")
+         (p "Calenio lets the user choose the visuals and other extraneous functionality. Unlike most heavy calendar applications, basic Calenio offers a simple list of text. This makes Calenio extremely fast.")
+         (h3 "How do I use Calenio?")
+         (p "Make an account and start adding calendar entries into it!")
          (a ([href ,(url index-page)]) "back to index")
          ))))
 
@@ -262,21 +275,29 @@
          (a ([href ,(url index-page)]) "back to index")
          ))))
 
+(define (today)
+  (define now (seconds->date (current-seconds)))
+  (string-append (~a #:align 'right #:left-pad-string "0" #:min-width 4 (number->string (date-year now))) "-"
+                 (~a #:align 'right #:left-pad-string "0" #:min-width 2 (number->string (date-month now))) "-"
+                 (~a #:align 'right #:left-pad-string "0" #:min-width 2 (number->string (date-day now)))))
+
 (define (add-entry req)
   (cond
     [(logged-in? req)
      (response/xexpr
        `(html
+          (head
+            (style ,(read-css (logged-in? req)) )
+            )
           (body
-            ,(log-out-button req)
-            (a ([href ,(url user-page (logged-in? req))]) ,(logged-in? req))
+            (div ([class "navbar"]) ,@(menu req))
             (form ([action "/add"] [id "add-entry-form"] [method "post"])
             (textarea ([form "add-entry-form"] [name "description"] [placeholder "description"]))
             (p "from: ")
-            (input ([name "from-date"] [placeholder "from-date"] [type "date"]))
+            (input ([name "from-date"] [placeholder "from-date"] [type "date"] [value ,(today)]))
             (input ([name "from-time"] [placeholder "from-time"] [type "time"] [value "00:00"]))
             (p "to: ")
-            (input ([name "to-date"] [placeholder "to-date"] [type "date"]))
+            (input ([name "to-date"] [placeholder "to-date"] [type "date"] [value ,(today)]))
             (input ([name "to-time"] [placeholder "to-time"] [type "time"] [value "23:59"]))
             (input ([type "submit"]))
             ))))]
@@ -327,13 +348,16 @@
     [(logged-in? req)
      (response/xexpr #:preamble #"<!DOCTYPE html>"
        `(html
+          (head
+            (style ,(read-css (logged-in? req)) )
+            )
           (body
-            ,(log-out-button req)
-            (a ([href ,(url user-page (logged-in? req))]) ,(logged-in? req))
+            (div ([class "navbar"]) ,@(menu req))
             (p "paste CSS/JS settings here")
-            (form ([action "/settings"] [id "form"] [method "post"])
-              (textarea ([form "form"] [placeholder "CSS"]))
-              (textarea ([form "form"] [placeholder "Javascript"]))
+            (form ([action ,(url settings-post)] [id "form"] [method "post"])
+              (textarea ([form "form"] [name "css"] [placeholder "CSS"]) ,(read-css (logged-in? req)))
+              (textarea ([form "form"] [name "js"] [placeholder "Javascript"]))
+              (input ([type "submit"]))
               )
             )))
      ]
@@ -342,6 +366,21 @@
      ])
   )
 
+(define (settings-post req)
+  (cond
+    [(logged-in? req)
+     (define css (get-post req 'css))
+     (define js (get-post req 'js))
+     (define path (build-path (logged-in? req)))
+     (with-output-to-file (build-path path "css") #:exists 'replace
+       (thunk (displayln css)))
+     (with-output-to-file (build-path path "js") #:exists 'replace
+       (thunk (displayln js)))
+     (redirect-to (url user-page (logged-in? req)))]
+    [else
+     (redirect-to (url login-page))
+     ])
+  )
 
 (define-values (dispatch url)
   (dispatch-rules
@@ -358,6 +397,7 @@
     (("add")             #:method "get" add-entry)
     (("add")             #:method "post" add-entry-post)
     (("settings")        #:method "get" settings-page)
+    (("settings")        #:method "post" settings-post)
     (("")                #:method "get" index-page)
     (else index-page)))
 
