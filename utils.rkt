@@ -120,8 +120,11 @@
   (define to (hash-ref entry 'to #f))
   `(p ,(seconds->datestring from) " - " ,(seconds->datestring to) ": " ,description
       " " (a ([href ,(string-append "/invite/" (path->string file))]) "invite")
-      (a ([href ,(path->string (build-path "/" "delete" (number->string week) (number->string year) file))]) "delete")
-      )
+      ; (a ([href ,(path->string (build-path "/" "delete" (number->string week) (number->string year) file))]) "delete")
+      (form
+        ([action ,(path->string (build-path "/" "delete" (number->string week) (number->string year) file))] [method "post"])
+        (input ([id "delete-button"] [type "submit"] [value "delete"]))
+      ))
   )
 
 (define (acsrf req)

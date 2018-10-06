@@ -397,7 +397,11 @@
      (redirect-to (url not-logged-in))]))
 
 (define (delete-entry req week year uuid)
-  (trce uuid)
+  (define username (logged-in? req))
+  (with-handlers ([exn?
+                    (lambda (exn)
+                      (erro+ exn))])
+    (delete-file (build-path username "calendar" (number->string year) (number->string week) uuid)))
   (redirect-to (url index-page)))
 
 (define-values (dispatch* url*)
