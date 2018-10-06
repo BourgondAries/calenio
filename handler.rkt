@@ -24,7 +24,7 @@
 (define (index-page req)
   (cond
     [(logged-in? req)
-     (redirect-to (url user-page (logged-in? req)))]
+     (redirect-to (url* user-page (logged-in? req)))]
     [else
      (response/xexpr
        #:preamble #"<!DOCTYPE html>"
@@ -77,7 +77,7 @@
                 (a ([href ,(url index-page)]) "back to index"))))]
     [else
      (define session (create-or-fetch-session-key username))
-     (redirect-to (url user-page username)
+     (redirect-to (url* user-page username)
        #:headers (list (cookie->header (make-cookie "username" username))
                        (cookie->header (make-cookie "session" session)))
        permanently)]
@@ -149,7 +149,7 @@
            `(html
               ,(common-head)
               (body (p "account made")
-                    (a ([href ,(url user-page username)]) "click here to go to your account")
+                    (a ([href ,(url* user-page username)]) "click here to go to your account")
                     (a ([href ,(url index-page)]) "back to new user"))))]
   ))
 
@@ -158,14 +158,14 @@
   `((div ([class "navbar"])
     ,(log-out-button req)
     ,(if (= (current-week) 0)
-      `(a ([href ,(url user-page-specific username 52 (sub1 (current-year)))]) "<<")
-      `(a ([href ,(url user-page-specific username (sub1 (current-week)))]) "<<"))
-    (a ([href ,(url user-page username)]) "now")
+      `(a ([href ,(url* user-page-specific username 52 (sub1 (current-year)))]) "<<")
+      `(a ([href ,(url* user-page-specific username (sub1 (current-week)))]) "<<"))
+    (a ([href ,(url* user-page username)]) "now")
     ,(if (= (current-week) 52)
-      `(a ([href ,(url user-page-specific username 0 (add1 (current-year)))]) ">>")
-      `(a ([href ,(url user-page-specific username (add1 (current-week)))]) ">>"))
-    (a ([href ,(url add-entry)]) "add")
-    (a ([href ,(url settings-page)]) "settings"))))
+      `(a ([href ,(url* user-page-specific username 0 (add1 (current-year)))]) ">>")
+      `(a ([href ,(url* user-page-specific username (add1 (current-week)))]) ">>"))
+    (a ([href ,(url* add-entry)]) "add")
+    (a ([href ,(url* settings-page)]) "settings"))))
 
 (define (user-page req ar)
   (cond
@@ -194,18 +194,18 @@
             (div ([class "navbar"])
               ,(log-out-button req)
               ,(if (= n 0)
-                `(a ([href ,(url user-page-specific ar 52 (sub1 year))]) "<<")
+                `(a ([href ,(url* user-page-specific ar 52 (sub1 year))]) "<<")
                 (if (= (current-year) year)
-                  `(a ([href ,(url user-page-specific ar (sub1 n))]) "<<")
-                  `(a ([href ,(url user-page-specific ar (sub1 n) year)]) "<<")))
-              (a ([href ,(url user-page ar)]) "now")
+                  `(a ([href ,(url* user-page-specific ar (sub1 n))]) "<<")
+                  `(a ([href ,(url* user-page-specific ar (sub1 n) year)]) "<<")))
+              (a ([href ,(url* user-page ar)]) "now")
               ,(if (> (add1 n) 52)
-                `(a ([href ,(url user-page-specific ar 0 (add1 year))]) ">>")
+                `(a ([href ,(url* user-page-specific ar 0 (add1 year))]) ">>")
                 (if (= (current-year) year)
-                  `(a ([href ,(url user-page-specific ar (add1 n))]) ">>")
-                  `(a ([href ,(url user-page-specific ar (add1 n) year)]) ">>")))
-              (a ([href ,(url add-entry)]) "add")
-              (a ([href ,(url settings-page)]) "settings"))
+                  `(a ([href ,(url* user-page-specific ar (add1 n))]) ">>")
+                  `(a ([href ,(url* user-page-specific ar (add1 n) year)]) ">>")))
+              (a ([href ,(url* add-entry)]) "add")
+              (a ([href ,(url* settings-page)]) "settings"))
             (div ([class "content"]) ,@(generate-user-page req ar n year))
             )))]
     [else
@@ -221,7 +221,7 @@
                          (trce exn)
                          (list '(p "there are no plans this week")))])
        (define entries (directory-list root))
-       (map entry->html
+       (map (entry->html week year)
          (sort
            (filter identity
              (for/list ([entry entries])
@@ -330,7 +330,7 @@
        (thunk (writeln (hash 'description description
                              'from (date->seconds from)
                              'to (date->seconds to)))))
-     (redirect-to (url user-page username))
+     (redirect-to (url* user-page username))
      ]
     [else
      (redirect-to (url not-logged-in))]
@@ -354,7 +354,7 @@
           (body
             (div ([class "navbar"]) ,@(menu req))
             (p "paste CSS/JS settings here")
-            (form ([action ,(url settings-post)] [id "form"] [method "post"])
+            (form ([action ,(url* settings-post)] [id "form"] [method "post"])
               (textarea ([form "form"] [name "css"] [placeholder "CSS"]) ,(read-css (logged-in? req)))
               (textarea ([form "form"] [name "js"] [placeholder "Javascript"]))
               (input ([type "submit"]))
@@ -376,28 +376,52 @@
        (thunk (displayln css)))
      (with-output-to-file (build-path path "js") #:exists 'replace
        (thunk (displayln js)))
-     (redirect-to (url user-page (logged-in? req)))]
+     (redirect-to (url* user-page (logged-in? req)))]
     [else
-     (redirect-to (url login-page))
-     ])
+     (redirect-to (url login-page))])
   )
+
+(define (test-method req)
+  (trce req)
+  (response/xexpr #:preamble #"<!DOCTYPE html>"
+    `(html
+       (body (p "Strong")))))
+
+(define (login-barrier req)
+  (cond
+    [(and (logged-in? req) (bytes=? (request-method req) #"POST"))
+     (dispatch* req)]
+    [(logged-in? req)
+     (dispatch* req)]
+    [else
+     (redirect-to (url not-logged-in))]))
+
+(define (delete-entry req week year uuid)
+  (trce uuid)
+  (redirect-to (url index-page)))
+
+(define-values (dispatch* url*)
+  (dispatch-rules
+    (["add"]             add-entry)
+    (["add"]                                       #:method "post" add-entry-post)
+    (["delete" (number-arg) (number-arg) (string-arg)] #:method "post"
+     delete-entry)
+    (["u"  (string-arg)]                           user-page)
+    (["u" (string-arg) (number-arg)]               user-page-specific)
+    (["u" (string-arg) (number-arg) (number-arg)]  user-page-specific)
+    (["settings"]                                  settings-page)
+    (["settings"]                                  #:method "post" settings-post)
+    ))
 
 (define-values (dispatch url)
   (dispatch-rules
-    (("not-logged-in")  #:method "get" not-logged-in)
     (("login")          #:method "post" login-page)
+    (("not-logged-in")  #:method "get" not-logged-in)
+    (("about")           #:method "get" about-page)
+    (("developers")      #:method "get" for-developers-page)
     (("new-account")    #:method "get" new-account)
     (("new-account")     #:method "post" new-account-post)
     (("log-out")         #:method "get" log-out)
-    (["u" (string-arg)]  #:method "get" user-page)
-    (["u" (string-arg) (number-arg)]  #:method "get" user-page-specific)
-    (["u" (string-arg) (number-arg) (number-arg)]  #:method "get" user-page-specific)
-    (("about")           #:method "get" about-page)
-    (("developers")      #:method "get" for-developers-page)
-    (("add")             #:method "get" add-entry)
-    (("add")             #:method "post" add-entry-post)
-    (("settings")        #:method "get" settings-page)
-    (("settings")        #:method "post" settings-post)
     (("")                #:method "get" index-page)
-    (else index-page)))
+    (else login-barrier)))
 

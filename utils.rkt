@@ -112,7 +112,7 @@
 (define (seconds->datestring seconds)
   (date->string (seconds->date seconds)))
 
-(define (entry->html con)
+(define ((entry->html week year) con)
   (define file (first con))
   (define entry (second con))
   (define description (hash-ref entry 'description #f))
@@ -120,8 +120,12 @@
   (define to (hash-ref entry 'to #f))
   `(p ,(seconds->datestring from) " - " ,(seconds->datestring to) ": " ,description
       " " (a ([href ,(string-append "/invite/" (path->string file))]) "invite")
-      (a ([href ,(string-append "/delete/" (path->string file))]) "delete")
+      (a ([href ,(path->string (build-path "/" "delete" (number->string week) (number->string year) file))]) "delete")
       )
+  )
+
+(define (acsrf req)
+  req ; TODO implement anti csrf
   )
 
 (define (current-year)
