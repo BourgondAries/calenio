@@ -10,16 +10,23 @@
   racket/bool (only-in racket/date date-display-format
                                    date->seconds
                                    date*->seconds)
-  racket/file racket/function racket/list racket/string
+  racket/file racket/format racket/function racket/list racket/string
   web-server/dispatch
   web-server/servlet
   web-server/servlet-env)
 
-(define (common-head)
-  '(head
+(define (common-head req)
+  `(head
      (meta ([charset "UTF-8"]))
      (meta ([content "The simple online calendar"] [name "description"]))
-     (title "Calenio")))
+     (title "Calenio")
+     ,@(if (logged-in? req)
+       `(
+         (link ([href ,(string-append "/file/user/" (logged-in? req) "/css")] [rel "stylesheet"] [type "text/css"]))
+         (script ([src ,(string-append "/file/user/" (logged-in? req) "/js")]))
+         )
+        '()
+     )))
 
 (define (get-cookie name cookies)
   (define result
@@ -52,7 +59,7 @@
                     (lambda (exn)
                       (erro "unable to read file")
                       "")])
-    (file->string (build-path username "css")))
+    (file->string (build-path "file" "user" username "css")))
   )
 
 (define (read-js username)
@@ -60,7 +67,7 @@
                     (lambda (exn)
                       (erro "unable to read file")
                       "")])
-    (file->string (build-path username "js")))
+    (file->string (build-path "file" "user" username "js")))
   )
 
 (define (create-or-fetch-session-key username)
@@ -112,14 +119,14 @@
 (define (seconds->datestring seconds)
   (date->string (seconds->date seconds)))
 
-(define ((entry->html week year) con)
+(define ((entry->html username week year) con)
   (define file (first con))
   (define entry (second con))
   (define description (hash-ref entry 'description #f))
   (define from (hash-ref entry 'from #f))
   (define to (hash-ref entry 'to #f))
   `(p ,(seconds->datestring from) " - " ,(seconds->datestring to) ": " ,description
-      " " (a ([href ,(string-append "/invite/" (path->string file))]) "invite")
+      " " (a ([href ,(path->string (build-path "/" "invite" username (number->string week) (number->string year) file))]) "invite")
       ; (a ([href ,(path->string (build-path "/" "delete" (number->string week) (number->string year) file))]) "delete")
       (form
         ([action ,(path->string (build-path "/" "delete" (number->string week) (number->string year) file))] [method "post"])
@@ -164,3 +171,18 @@
     [else
       #f]))
 
+(define (date->date-string date)
+  (string-append
+    (~a #:align 'right #:left-pad-string "0" #:min-width 4 (date-year date))
+    "-"
+    (~a #:align 'right #:left-pad-string "0" #:min-width 2 (date-month date))
+    "-"
+    (~a #:align 'right #:left-pad-string "0" #:min-width 2 (date-day date)))
+  )
+
+(define (date->time-string date)
+  (string-append
+    (~a #:align 'right #:left-pad-string "0" #:min-width 2 (date-hour date))
+    ":"
+    (~a #:align 'right #:left-pad-string "0" #:min-width 2 (date-minute date))
+  ))
