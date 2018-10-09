@@ -297,15 +297,12 @@
 
 (define (add-entry-post req)
   (define username (logged-in? req))
-  (define description (get-post req 'description))
+  (bind req description)
   (cond
     [(> (string-length description) 2048)
      (redirect-to (url* too-much-description))]
     [else
-     (define from-date (get-post req 'from-date))
-     (define from-time (get-post req 'from-time))
-     (define to-date (get-post req 'to-date))
-     (define to-time (get-post req 'to-time))
+     (bind req from-date from-time to-date to-time)
      ;; Processing
      (warn (string-append from-date "T" from-time))
      (define from (string->date (string-append from-date "T" from-time) "~Y-~m-~dT~H:~M"))
@@ -352,8 +349,7 @@
          ))))
 
 (define (settings-post req)
-  (define css (get-post req 'css))
-  (define js (get-post req 'js))
+  (bind req css js)
   (cond
     [(> (string-length css) 2048)
      (redirect-to (url* too-much-css))]
