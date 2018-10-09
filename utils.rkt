@@ -3,6 +3,7 @@
 (provide (all-defined-out))
 
 (require
+  (for-syntax racket/base)
   libuuid
   logger
   sha
@@ -11,6 +12,7 @@
                                    date->seconds
                                    date*->seconds)
   racket/file racket/format racket/function racket/list racket/string
+  syntax/parse/define
   web-server/dispatch
   web-server/servlet
   web-server/servlet-env)
@@ -125,13 +127,20 @@
   (define description (hash-ref entry 'description #f))
   (define from (hash-ref entry 'from #f))
   (define to (hash-ref entry 'to #f))
-  `(p ,(seconds->datestring from) " - " ,(seconds->datestring to) ": " ,description
+  `(div ([class "content"])
+     (span ([class "from"]) ,(seconds->datestring from))
+     " - "
+     (span ([class "to"]) ,(seconds->datestring to))
+     ": "
+     (span ([class "description"]) ,description)
       " " (a ([href ,(path->string (build-path "/" "invite" username (number->string week) (number->string year) file))]) "invite")
-      ; (a ([href ,(path->string (build-path "/" "delete" (number->string week) (number->string year) file))]) "delete")
-      (form
-        ([action ,(path->string (build-path "/" "delete" (number->string week) (number->string year) file))] [method "post"])
-        (input ([id "delete-button"] [type "submit"] [value "delete"]))
-      ))
+      " "
+     (button ([class "delete-button"] [form ,(path->string file)] [type "submit"] [value "delete"]) "delete")
+     (form
+       ([action ,(path->string (build-path "/" "delete" (number->string week) (number->string year) file))] [id ,(path->string file)] [method "post"])
+     ; (input ([class "delete-button"] [type "submit"] [value "delete"]))
+     )
+   )
   )
 
 (define (acsrf req)
@@ -186,3 +195,8 @@
     ":"
     (~a #:align 'right #:left-pad-string "0" #:min-width 2 (date-minute date))
   ))
+
+(define-syntax-parser bind
+  ([_ request:expr name:id ...+]
+   #'(begin
+       (define name (get-post request 'name)) ...)))

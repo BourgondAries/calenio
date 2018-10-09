@@ -3,6 +3,7 @@
 (provide dispatch file-not-found)
 
 (require
+  (for-syntax racket/base)
   "utils.rkt"
   libuuid
   logger
@@ -12,14 +13,19 @@
                                    date->seconds
                                    date*->seconds)
   racket/file racket/format racket/function racket/list racket/string
+  syntax/parse/define
   web-server/dispatch
   web-server/servlet
   web-server/servlet-env)
 
 (define (log-out req)
-  (define ex "Thu, 01 Jan 1970 00:00:01 GMT")
-  (redirect-to (url index-page) #:headers (list (cookie->header (make-cookie "username" "" #:expires ex))
-                                                (cookie->header (make-cookie "session" "" #:expires ex)))))
+  (define expire-1970 "Thu, 01 Jan 1970 00:00:01 GMT")
+  (redirect-to
+    (url index-page)
+    #:headers
+      (list
+        (cookie->header (make-cookie "username" "" #:expires expire-1970))
+        (cookie->header (make-cookie "session"  "" #:expires expire-1970)))))
 
 (define (index-page req)
   (cond
@@ -53,8 +59,7 @@
              (a ([href "/"]) "back to index")))))
 
 (define (login-page req)
-  (define username (get-post req 'username))
-  (define password (get-post req 'password))
+  (bind req username password)
   (trce (request-client-ip req)) ; TODO Add this to a database of last created users with a count
   (cond
     [(empty-string? username)
@@ -101,49 +106,38 @@
          (p (a ([href "/"]) "back to index"))
          ))))
 
+(define (error-response req message)
+  (response/xexpr
+    #:preamble #"<!DOCTYPE html>"
+    `(html
+       ,(common-head req)
+       (body (p ,message)
+             (a ([href ,(url new-account)]) "back to new user")))))
+
 (define (new-account-post req)
-  (define username (get-post req 'username))
-  (info username)
-  (define password (get-post req 'password))
-  (info password)
-  (define password* (get-post req 'password*))
-  (info password*)
+  (bind req username password password*)
+  (define new-user `(a ([href ,(url new-account)]) "back to new user"))
   (cond
     [(not (equal? password password*))
-     (response/xexpr
-           #:preamble #"<!DOCTYPE html>"
-           `(html
-              ,(common-head req)
-              (body (p "passwords do not match")
-                    (a ([href ,(url new-account)]) "back to new user"))))]
+     (error-response req "passwords do not match")]
+    [(> (string-length password) 2048)
+     (error-response req "password too long (max 2048 characters)")]
     [(empty-string? username)
-     (response/xexpr
-           #:preamble #"<!DOCTYPE html>"
-           `(html
-              ,(common-head req)
-              (body (p "no username provided")
-                    (a ([href ,(url new-account)]) "back to new user"))))]
+     (error-response req "no username provided")]
+    [(> (string-length username) 200)
+     (error-response req "username too long (max 200 characters)")]
     [(user-exists? username)
-     (response/xexpr
-           #:preamble #"<!DOCTYPE html>"
-           `(html
-              ,(common-head req)
-              (body (p "user already exists")
-                    (a ([href ,(url new-account)]) "back to new user"))))]
+     (error-response req "user already exists")]
     [(not (valid-username? username))
-     (response/xexpr
-           #:preamble #"<!DOCTYPE html>"
-           `(html
-              ,(common-head req)
-              (body (p "username invalid - must be a sequence of characters excluding '/'")
-                    (a ([href ,(url new-account)]) "back to new user"))))]
+     (error-response req "username invalid - must be a sequence of characters excluding '/'")]
     [else
-     ; (redirect-to <site> #:headers (list (cookie->header <your cookie>)) temporarily|permanent)
      (create-user username password)
      (define session (create-or-fetch-session-key username))
-     (with-output-to-file (build-path username "css")
-       (thunk (displayln ".navbar a { padding-right: 1em; }")))
-     (with-output-to-file (build-path username "js")
+     (define base (build-path "file" "user" username))
+     (make-directory* base)
+     (with-output-to-file (build-path base "css")
+       (thunk (displayln ".navbar > a { padding-right: 0em; }\n.content .description { color: #39CCCC; }\n.content .from { color: #3D9970; }\n.content .to { color: #FF851B; }\n")))
+     (with-output-to-file (build-path base "js")
        (thunk (displayln "")))
      (response/xexpr
            #:preamble #"<!DOCTYPE html>"
@@ -183,43 +177,39 @@
           ,(common-head req)
           (body
             ,@(menu req)
-            (div ([class "content"]) ,@(generate-user-page req ar))
+            ,(generate-user-page req ar)
             )))]
     [else
       (redirect-to (url index-page))]))
 
 (define (user-page-specific req ar n [year (current-year)])
-  (cond
-    [(logged-in? req)
-     (response/xexpr
-       #:preamble #"<!DOCTYPE html>"
-       `(html
-          ,(common-head req)
-          (body
-            (p ([class "navbar"])
-              ,(log-out-button req)
-              " "
-              ,(if (= n 0)
-                `(a ([href ,(url* user-page-specific ar 52 (sub1 year))]) "<<")
-                (if (= (current-year) year)
-                  `(a ([href ,(url* user-page-specific ar (sub1 n))]) "<<")
-                  `(a ([href ,(url* user-page-specific ar (sub1 n) year)]) "<<")))
-              " "
-              (a ([href ,(url* user-page ar)]) "now")
-              " "
-              ,(if (> (add1 n) 52)
-                `(a ([href ,(url* user-page-specific ar 0 (add1 year))]) ">>")
-                (if (= (current-year) year)
-                  `(a ([href ,(url* user-page-specific ar (add1 n))]) ">>")
-                  `(a ([href ,(url* user-page-specific ar (add1 n) year)]) ">>")))
-              " "
-              (a ([href ,(url* add-entry)]) "add")
-              " "
-              (a ([href ,(url* settings-page)]) "settings"))
-            (div ([class "content"]) ,@(generate-user-page req ar n year))
-            )))]
-    [else
-      (redirect-to (url index-page))]))
+  (response/xexpr
+    #:preamble #"<!DOCTYPE html>"
+    `(html
+       ,(common-head req)
+       (body
+         (p ([class "navbar"])
+           ,(log-out-button req)
+           " "
+           ,(if (= n 0)
+             `(a ([href ,(url* user-page-specific ar 52 (sub1 year))]) "<<")
+             (if (= (current-year) year)
+               `(a ([href ,(url* user-page-specific ar (sub1 n))]) "<<")
+               `(a ([href ,(url* user-page-specific ar (sub1 n) year)]) "<<")))
+           " "
+           (a ([href ,(url* user-page ar)]) "now")
+           " "
+           ,(if (> (add1 n) 52)
+             `(a ([href ,(url* user-page-specific ar 0 (add1 year))]) ">>")
+             (if (= (current-year) year)
+               `(a ([href ,(url* user-page-specific ar (add1 n))]) ">>")
+               `(a ([href ,(url* user-page-specific ar (add1 n) year)]) ">>")))
+           " "
+           (a ([href ,(url* add-entry)]) "add")
+           " "
+           (a ([href ,(url* settings-page)]) "settings"))
+         ,(generate-user-page req ar n year)
+         ))))
 
 (define (generate-user-page req ar [week (current-week)] [year (current-year)])
   (cond
@@ -229,7 +219,7 @@
      (with-handlers ([exn?
                        (lambda (exn)
                          (trce exn)
-                         (list '(p "there are no plans this week")))])
+                         '(div ([id "calendar"]) (p "there are no plans this week")))])
        (define entries (directory-list root))
        (define r
          (map (entry->html ar week year)
@@ -244,13 +234,14 @@
                        [else (warn `("File does not contain #hash: " ,entry)) #f])))))
              <
              #:key (lambda (x) (hash-ref (second x) 'from 0)))))
-       (if (empty? r)
-         (list '(p "there are no plans this week"))
-         r)
+       `(div ([id "calendar"])
+         ,@(if (empty? r)
+           (list '(p "there are no plans this week"))
+           r))
        )
      ]
     [else
-     '()])
+     '(div ([id "calendar"]) (p "you do not have permission to view someone else's profile"))])
   )
 
 (define (about-page req)
@@ -296,45 +287,50 @@
 
 (define (add-entry req)
   (response/xexpr
+    #:preamble #"<!DOCTYPE html>"
     `(html
        ,(common-head req)
        (body
-         (div ([class "navbar"]) ,@(menu req))
-         (form ([action "/add"] [id "add-entry-form"] [method "post"])
-         (textarea ([form "add-entry-form"] [name "description"] [placeholder "description"]))
-         (p "from: ")
-         (input ([name "from-date"] [placeholder "from-date"] [type "date"] [value ,(today)]))
-         (input ([name "from-time"] [placeholder "from-time"] [type "time"] [value "00:00"]))
-         (p "to: ")
-         (input ([name "to-date"] [placeholder "to-date"] [type "date"] [value ,(today)]))
-         (input ([name "to-time"] [placeholder "to-time"] [type "time"] [value "23:59"]))
-         (input ([type "submit"]))
-         )))))
+         ,@(menu req)
+         (form ([action ,(url* add-entry-post)] [id "add-entry-form"] [method "post"])
+           (textarea ([id "description"] [form "add-entry-form"] [name "description"] [placeholder "description"]))
+           (p ([id "from"]) "from: "
+             (input ([id "from-date"] [name "from-date"] [placeholder "from-date"] [type "date"] [value ,(today)]))
+             (input ([id "from-time"] [name "from-time"] [placeholder "from-time"] [type "time"] [value "13:15"])))
+           (p ([id "to"]) "to: "
+             (input ([id "to-date"] [name "to-date"] [placeholder "to-date"] [type "date"] [value ,(today)]))
+             (input ([id "to-time"] [name "to-time"] [placeholder "to-time"] [type "time"] [value "14:00"])))
+           (input ([type "submit"]))
+           )))))
 
 (define (add-entry-post req)
   (define username (logged-in? req))
   (define description (get-post req 'description))
-  (define from-date (get-post req 'from-date))
-  (define from-time (get-post req 'from-time))
-  (define to-date (get-post req 'to-date))
-  (define to-time (get-post req 'to-time))
-  ;; Processing
-  (warn (string-append from-date "T" from-time))
-  (define from (string->date (string-append from-date "T" from-time) "~Y-~m-~dT~H:~M"))
-  (define to (string->date (string-append to-date "T" to-time) "~Y-~m-~dT~H:~M"))
-  (trce (date*->seconds to))
-  (trce (date-week-number to 1))
-  (warn from to)
-  (erro description req)
-  (define year (date-year from))
-  (define week (date-week-number from 1))
-  (define path (build-path username "calendar" (number->string year) (number->string week)))
-  (make-directory* path)
-  (with-output-to-file (build-path path (uuid-generate))
-    (thunk (writeln (hash 'description description
-                          'from (date->seconds from)
-                          'to (date->seconds to)))))
-  (redirect-to (url* user-page username)))
+  (cond
+    [(> (string-length description) 2048)
+     (redirect-to (url* too-much-description))]
+    [else
+     (define from-date (get-post req 'from-date))
+     (define from-time (get-post req 'from-time))
+     (define to-date (get-post req 'to-date))
+     (define to-time (get-post req 'to-time))
+     ;; Processing
+     (warn (string-append from-date "T" from-time))
+     (define from (string->date (string-append from-date "T" from-time) "~Y-~m-~dT~H:~M"))
+     (define to (string->date (string-append to-date "T" to-time) "~Y-~m-~dT~H:~M"))
+     (trce (date*->seconds to))
+     (trce (date-week-number to 1))
+     (warn from to)
+     (erro description req)
+     (define year (date-year from))
+     (define week (date-week-number from 1))
+     (define path (build-path username "calendar" (number->string year) (number->string week)))
+     (make-directory* path)
+     (with-output-to-file (build-path path (uuid-generate))
+       (thunk (writeln (hash 'description description
+                             'from (date->seconds from)
+                             'to (date->seconds to)))))
+     (redirect-to (url* user-page username))]))
 
 (define (not-logged-in req)
   (response/xexpr
@@ -350,13 +346,17 @@
     `(html
        ,(common-head req)
        (body
-         (div ([class "navbar"]) ,@(menu req))
-         (p "paste CSS/JS settings here")
+         ,@(menu req)
+         (p "paste custom CSS/JS here")
          (form ([action ,(url* settings-post)] [id "form"] [method "post"])
            (textarea ([form "form"] [name "css"] [placeholder "CSS"]) ,(read-css (logged-in? req)))
            (textarea ([form "form"] [name "js"] [placeholder "Javascript"]) ,(read-js (logged-in? req)))
            (input ([type "submit"]))
            )
+         (form ([action "/"]) [method "post"]
+           (input ([type "text"]))
+           )
+         (p "you may need to clear your browser cache for your changes to take effect (in the future, we want to set a cookie that adds an argument to get a different stylesheet (e.g. 'GET /file/user/css?r=32'), so we do not need the user to manually clear his cache)")
          ))))
 
 (define (settings-post req)
@@ -420,7 +420,8 @@
     `(html
        ,(common-head req)
        (body
-         (div ([class "navbar"]) ,@(menu req))
+         ,@(menu req)
+         (p "If you wish to invite others, please send them the current address")
          (form ([action "/add"] [id "add-entry-form"] [method "post"])
          (textarea ([form "add-entry-form"] [name "description"] [placeholder "description"]) ,desc)
          (p "from: ")
@@ -448,6 +449,14 @@
        (body (p "too much js code (limit: 2048 characters)")
              (a ([href "/"]) "back to user")))))
 
+(define (too-much-description req)
+  (response/xexpr
+    #:code 404 #:preamble #"<!DOCTYPE html>"
+    `(html
+       ,(common-head req)
+       (body (p "description too long (limit: 2048 characters)")
+             (a ([href "/"]) "back to user")))))
+
 (define-values (dispatch* url*)
   (dispatch-rules
     (["add"]            add-entry)
@@ -461,18 +470,18 @@
     (["settings"]                                  settings-page)
     (["settings"]                                  #:method "post" settings-post)
     (["too-much-css"]            too-much-css)
+    (["too-much-description"]            too-much-description)
     (["too-much-js"]            too-much-js)
     ))
 
 (define-values (dispatch url)
   (dispatch-rules
-    (("login")          #:method "post" login-page)
-    (("not-logged-in")  #:method "get" not-logged-in)
-    (("about")           #:method "get" about-page)
-    (("developers")      #:method "get" for-developers-page)
-    (("new-account")    #:method "get" new-account)
-    (("new-account")     #:method "post" new-account-post)
-    (("log-out")         #:method "get" log-out)
-    (("")                #:method "get" index-page)
-    (else login-barrier)))
-
+    (["about"]           #:method "get" about-page)
+    (["developers"]      #:method "get" for-developers-page)
+    (["login"]           #:method "post" login-page)
+    (["log-out"]         #:method "get" log-out)
+    (["not-logged-in"]   #:method "get" not-logged-in)
+    (["new-account"]     #:method "get" new-account)
+    (["new-account"]     #:method "post" new-account-post)
+    ([""]                #:method "get" index-page)
+    (else                login-barrier)))
