@@ -58,31 +58,24 @@
        (body (p "file not found")
              (a ([href "/"]) "back to index")))))
 
+(define (error-response-login req message)
+  (response/xexpr
+    #:preamble #"<!DOCTYPE html>"
+    `(html
+       ,(common-head req)
+       (body (p ,message)
+             (a ([href ,(url index-page)]) "back to login page")))))
+
 (define (login-page req)
   (bind req username password)
   (trce (request-client-ip req)) ; TODO Add this to a database of last created users with a count
   (cond
     [(empty-string? username)
-     (response/xexpr
-       #:preamble #"<!DOCTYPE html>"
-       `(html
-          ,(common-head req)
-          (body (p "no username provided")
-                (a ([href ,(url index-page)]) "back to index"))))]
+     (error-response-login req "no username provided")]
     [(not (user-exists? username))
-     (response/xexpr
-       #:preamble #"<!DOCTYPE html>"
-       `(html
-          ,(common-head req)
-          (body (p "user does not exist")
-                (a ([href ,(url index-page)]) "back to index"))))]
+     (error-response-login req "user does not exist")]
     [(not (correct-password? username password))
-     (response/xexpr
-       #:preamble #"<!DOCTYPE html>"
-       `(html
-          ,(common-head req)
-          (body (p "wrong password")
-                (a ([href ,(url index-page)]) "back to index"))))]
+     (error-response-login req "wrong password")]
     [else
      (define session (create-or-fetch-session-key username))
      (redirect-to (url* user-page username)
@@ -116,9 +109,8 @@
 
 (define (new-account-post req)
   (bind req username password password*)
-  (define new-user `(a ([href ,(url new-account)]) "back to new user"))
   (cond
-    [(not (equal? password password*))
+    [(not (string=? password password*))
      (error-response req "passwords do not match")]
     [(> (string-length password) 2048)
      (error-response req "password too long (max 2048 characters)")]
