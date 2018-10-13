@@ -5,16 +5,14 @@
          web-server/servlet
          web-server/servlet-env)
 
-(define blog-dispatch (reloadable-entry-point->procedure
+(define dispatch (reloadable-entry-point->procedure
   (make-reloadable-entry-point 'dispatch "handler.rkt")))
 (define file-not-found (reloadable-entry-point->procedure
   (make-reloadable-entry-point 'file-not-found "handler.rkt")))
 
-(define (start req)
-  (reload!)
-  (blog-dispatch req))
+(reload!)
 
-(serve/servlet start
+(serve/servlet dispatch
   #:stateless? #t
   #:listen-ip #f
   #:port 8000

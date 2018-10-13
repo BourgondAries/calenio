@@ -18,14 +18,67 @@
   web-server/servlet
   web-server/servlet-env)
 
-(define (log-out req)
-  (define expire-1970 "Thu, 01 Jan 1970 00:00:01 GMT")
-  (redirect-to
-    (url index-page)
-    #:headers
-      (list
-        (cookie->header (make-cookie "username" "" #:expires expire-1970))
-        (cookie->header (make-cookie "session"  "" #:expires expire-1970)))))
+(define-syntax-parser cookie
+  ([_ key:expr value:expr rest ...]
+   #'(cookie->header (make-cookie key value rest ...))))
+
+(define (log-out-button req)
+  `(a ([href ,(url log-out)]) "log out")
+  )
+
+(define (menu req)
+  (define username (logged-in? req))
+  `((p ([class "navbar"])
+    ,(log-out-button req)
+    " "
+    ,(if (= (current-week) 0)
+      `(a ([href ,(url* user-page-specific username 52 (sub1 (current-year)))]) "<<")
+      `(a ([href ,(url* user-page-specific username (sub1 (current-week)))]) "<<"))
+    " "
+    (a ([href ,(url* user-page username)]) "now")
+    " "
+    ,(if (= (current-week) 52)
+      `(a ([href ,(url* user-page-specific username 0 (add1 (current-year)))]) ">>")
+      `(a ([href ,(url* user-page-specific username (add1 (current-week)))]) ">>"))
+    " "
+    (a ([href ,(url* add-entry)]) "add")
+    " "
+    (a ([href ,(url* settings-page)]) "settings"))))
+
+
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;; GET request pages
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+(define (not-logged-in req)
+  (response/xexpr
+    `(html
+       (body
+         (p "you are not logged in")
+         (a ([href ,(url index-page)]) "go to index page")))))
+
+(define (back-to-index-error req message)
+  (response/xexpr
+    #:preamble #"<!DOCTYPE html>"
+    `(html
+       ,(common-head req)
+       (body (p ,message)
+             (a ([href ,(url index-page)]) "back to login page")))))
+
+(define (back-to-new-account-error req message)
+  (response/xexpr
+    #:preamble #"<!DOCTYPE html>"
+    `(html
+       ,(common-head req)
+       (body (p ,message)
+             (a ([href ,(url new-account)]) "back to new user")))))
+
+(define (file-not-found req)
+  (response/xexpr
+    #:code 404 #:preamble #"<!DOCTYPE html>"
+    `(html
+       ,(common-head req)
+       (body (p "file not found")
+             (a ([href ,(url index-page)]) "back to index")))))
 
 (define (index-page req)
   (cond
@@ -50,39 +103,14 @@
                 (li (a ([href ,(url for-developers-page)]) "For developers"))))
             )))]))
 
-(define (file-not-found req)
-  (response/xexpr
-    #:code 404 #:preamble #"<!DOCTYPE html>"
-    `(html
-       ,(common-head req)
-       (body (p "file not found")
-             (a ([href "/"]) "back to index")))))
-
-(define (error-response-login req message)
-  (response/xexpr
-    #:preamble #"<!DOCTYPE html>"
-    `(html
-       ,(common-head req)
-       (body (p ,message)
-             (a ([href ,(url index-page)]) "back to login page")))))
-
-(define (login-page req)
-  (bind req username password)
-  (trce (request-client-ip req)) ; TODO Add this to a database of last created users with a count
-  (cond
-    [(empty-string? username)
-     (error-response-login req "no username provided")]
-    [(not (user-exists? username))
-     (error-response-login req "user does not exist")]
-    [(not (correct-password? username password))
-     (error-response-login req "wrong password")]
-    [else
-     (define session (create-or-fetch-session-key username))
-     (redirect-to (url* user-page username)
-       #:headers (list (cookie->header (make-cookie "username" username))
-                       (cookie->header (make-cookie "session" session)))
-       permanently)]
-    ))
+(define (log-out req)
+  (define expire-1970 "Thu, 01 Jan 1970 00:00:01 GMT")
+  (redirect-to
+    (url index-page)
+    #:headers
+      (list
+        (cookie "username" "" #:expires expire-1970)
+        (cookie "session"  "" #:expires expire-1970))))
 
 (define (new-account req)
   (response/xexpr
@@ -99,80 +127,15 @@
          (p (a ([href "/"]) "back to index"))
          ))))
 
-(define (error-response req message)
+(define (user-page req ar)
   (response/xexpr
     #:preamble #"<!DOCTYPE html>"
     `(html
        ,(common-head req)
-       (body (p ,message)
-             (a ([href ,(url new-account)]) "back to new user")))))
-
-(define (new-account-post req)
-  (bind req username password password*)
-  (cond
-    [(not (string=? password password*))
-     (error-response req "passwords do not match")]
-    [(> (string-length password) 2048)
-     (error-response req "password too long (max 2048 characters)")]
-    [(empty-string? username)
-     (error-response req "no username provided")]
-    [(> (string-length username) 200)
-     (error-response req "username too long (max 200 characters)")]
-    [(user-exists? username)
-     (error-response req "user already exists")]
-    [(not (valid-username? username))
-     (error-response req "username invalid - must be a sequence of characters excluding '/'")]
-    [else
-     (create-user username password)
-     (define session (create-or-fetch-session-key username))
-     (define base (build-path "file" "user" username))
-     (make-directory* base)
-     (with-output-to-file (build-path base "css")
-       (thunk (displayln ".navbar > a { padding-right: 0em; }\n.content .description { color: #39CCCC; }\n.content .from { color: #3D9970; }\n.content .to { color: #FF851B; }\n")))
-     (with-output-to-file (build-path base "js")
-       (thunk (displayln "")))
-     (response/xexpr
-           #:preamble #"<!DOCTYPE html>"
-           #:headers (list (cookie->header (make-cookie "username" username))
-                           (cookie->header (make-cookie "session" session)))
-           `(html
-              ,(common-head req)
-              (body (p "Account made"
-                    (p (a ([href ,(url* user-page username)]) "click here to go to your account"))))))]
-  ))
-
-(define (menu req)
-  (define username (logged-in? req))
-  `((p ([class "navbar"])
-    ,(log-out-button req)
-    " "
-    ,(if (= (current-week) 0)
-      `(a ([href ,(url* user-page-specific username 52 (sub1 (current-year)))]) "<<")
-      `(a ([href ,(url* user-page-specific username (sub1 (current-week)))]) "<<"))
-    " "
-    (a ([href ,(url* user-page username)]) "now")
-    " "
-    ,(if (= (current-week) 52)
-      `(a ([href ,(url* user-page-specific username 0 (add1 (current-year)))]) ">>")
-      `(a ([href ,(url* user-page-specific username (add1 (current-week)))]) ">>"))
-    " "
-    (a ([href ,(url* add-entry)]) "add")
-    " "
-    (a ([href ,(url* settings-page)]) "settings"))))
-
-(define (user-page req ar)
-  (cond
-    [(logged-in? req)
-     (response/xexpr
-       #:preamble #"<!DOCTYPE html>"
-       `(html
-          ,(common-head req)
-          (body
-            ,@(menu req)
-            ,(generate-user-page req ar)
-            )))]
-    [else
-      (redirect-to (url index-page))]))
+       (body
+         ,@(menu req)
+         ,(generate-user-page req ar)
+         ))))
 
 (define (user-page-specific req ar n [year (current-year)])
   (response/xexpr
@@ -203,14 +166,102 @@
          ,(generate-user-page req ar n year)
          ))))
 
+(define (about-page req)
+  (response/xexpr
+    `(html
+       ,(common-head req)
+       (body
+         (h1 "What is Calenio?")
+         (p "Calenio is a calendar application.")
+         (h2 "What distinguishes Calenio from other services?")
+         (p "Calenio lets the user choose the visuals and other extraneous functionality. Unlike most heavy calendar applications, basic Calenio offers a simple list of text. This makes Calenio extremely fast.")
+         (h3 "How do I use Calenio?")
+         (p "Make an account and start adding calendar entries into it!")
+         (h3 "Inspiration")
+         (p "Calenio is inspired by " (a ([href "https://motherfuckingwebsite.com"]) "motherfucking website") ", " (a ([href "https://suckless.org"]) "suckless") ", and my friends at work who always joke about bloated as fuck software being so bullshit.")
+         (a ([href ,(url index-page)]) "back to index")
+         ))))
+
+(define (for-developers-page req)
+  (response/xexpr
+    `(html
+       ,(common-head req)
+       (body
+         (h1 "Calenio Public API")
+         (div
+           (p "Calenio is a REST-based application that communicates over HTTP.")
+           (p "One first needs to get the username and session cookies by logging in: " (code "POST /login") " with POST data: " (code "username=<username>, password=<password>"))
+           (h2 "After having logged in")
+           (p "To add a calendar entry: " (code "POST /add") " with POST data `description`, `from-date`, `from-time`, `to-date`, and `to-time`. An example: " (code "POST /add") " with post data: " (code "description=An Example&from-date=2018-06-12&from-time=18:33&to-date=2018-06-12&to-time=19:00"))
+           )
+         (a ([href ,(url index-page)]) "back to index")
+         ))))
+
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;; POST request pages
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+(define (login-page req)
+  (bind req username password)
+  (trce+ (request-client-ip req)) ; TODO Add this to a database of last created users with a count
+  (cond
+    [(empty-string? username)
+     (back-to-index-error req "no username provided")]
+    [(not (user-exists? username))
+     (back-to-index-error req "user does not exist")]
+    [(not (correct-password? username password))
+     (back-to-index-error req "wrong password")]
+    [else
+     (define session (create-or-fetch-session-key username))
+     (redirect-to (url* user-page username)
+       #:headers (list (cookie "username" username)
+                       (cookie "session" session))
+       permanently)]
+    ))
+
+(define (new-account-post req)
+  (bind req username password password*)
+  (cond
+    [(not (string=? password password*))
+     (back-to-new-account-error req "passwords do not match")]
+    [(> (string-length password) 2048)
+     (back-to-new-account-error req "password too long (max 2048 characters)")]
+    [(empty-string? username)
+     (back-to-new-account-error req "no username provided")]
+    [(> (string-length username) 200)
+     (back-to-new-account-error req "username too long (max 200 characters)")]
+    [(user-exists? username)
+     (back-to-new-account-error req "user already exists")]
+    [(not (valid-username? username))
+     (back-to-new-account-error req "username invalid - must be a sequence of characters excluding '/'")]
+    [else
+     (create-user username password)
+     (define session (create-or-fetch-session-key username))
+     (define base (user-dir username))
+     (make-directory* base)
+     (copy-directory/files 
+       (build-path "settings" "default.css")
+       (build-path base "css"))
+     (copy-directory/files 
+       (build-path "settings" "default.js")
+       (build-path base "js"))
+     (response/xexpr
+           #:preamble #"<!DOCTYPE html>"
+           #:headers (list (cookie "username" username)
+                           (cookie "session" session))
+           `(html
+              ,(common-head req)
+              (body (p "Account made"
+                    (p (a ([href ,(url* user-page username)]) "click here to go to your account"))))))]
+  ))
+
 (define (generate-user-page req ar [week (current-week)] [year (current-year)])
   (cond
     [(string=? (logged-in? req) ar)
      (define now (current-date))
-     (define root (build-path ar "calendar" (number->string year) (number->string week)))
+     (define root (build-path (user-dir ar) "calendar" (number->string year) (number->string week)))
      (with-handlers ([exn?
                        (lambda (exn)
-                         (trce exn)
+                         (trce+ exn)
                          '(div ([id "calendar"]) (p "there are no plans this week")))])
        (define entries (directory-list root))
        (define r
@@ -235,47 +286,6 @@
     [else
      '(div ([id "calendar"]) (p "you do not have permission to view someone else's profile"))])
   )
-
-(define (about-page req)
-  (response/xexpr
-    `(html
-       ,(common-head req)
-       (body
-         (h1 "What is Calenio?")
-         (p "Calenio is a calendar application.")
-         (h2 "What distinguishes Calenio from other services?")
-         (p "Calenio lets the user choose the visuals and other extraneous functionality. Unlike most heavy calendar applications, basic Calenio offers a simple list of text. This makes Calenio extremely fast.")
-         (h3 "How do I use Calenio?")
-         (p "Make an account and start adding calendar entries into it!")
-         (h3 "Inspiration")
-         (p "Calenio is inspired by " (a ([href "https://motherfuckingwebsite.com"]) "motherfucking website") ", " (a ([href "https://suckless.org"]) "suckless") ", and my friends at work who always joke about bloated as fuck software being so bullshit.")
-         (a ([href ,(url index-page)]) "back to index")
-         ))))
-
-(define (log-out-button req)
-  `(a ([href ,(url log-out)]) "log out")
-  )
-
-(define (for-developers-page req)
-  (response/xexpr
-    `(html
-       ,(common-head req)
-       (body
-         (h1 "Calenio Public API")
-         (div
-           (p "Calenio is a REST-based application that communicates over HTTP.")
-           (p "One first needs to get the username and session cookies by logging in: " (code "POST /login") " with POST data: " (code "username=<username>, password=<password>"))
-           (h2 "After having logged in")
-           (p "To add a calendar entry: " (code "POST /add") " with POST data `description`, `from-date`, `from-time`, `to-date`, and `to-time`. An example: " (code "POST /add") " with post data: " (code "description=An Example&from-date=2018-06-12&from-time=18:33&to-date=2018-06-12&to-time=19:00"))
-           )
-         (a ([href ,(url index-page)]) "back to index")
-         ))))
-
-(define (today)
-  (define now (seconds->date (current-seconds)))
-  (string-append (~a #:align 'right #:left-pad-string "0" #:min-width 4 (number->string (date-year now))) "-"
-                 (~a #:align 'right #:left-pad-string "0" #:min-width 2 (number->string (date-month now))) "-"
-                 (~a #:align 'right #:left-pad-string "0" #:min-width 2 (number->string (date-day now)))))
 
 (define (add-entry req)
   (response/xexpr
@@ -307,13 +317,13 @@
      (warn (string-append from-date "T" from-time))
      (define from (string->date (string-append from-date "T" from-time) "~Y-~m-~dT~H:~M"))
      (define to (string->date (string-append to-date "T" to-time) "~Y-~m-~dT~H:~M"))
-     (trce (date*->seconds to))
-     (trce (date-week-number to 1))
+     (trce+ (date*->seconds to))
+     (trce+ (date-week-number to 1))
      (warn from to)
      (erro description req)
      (define year (date-year from))
      (define week (date-week-number from 1))
-     (define path (build-path username "calendar" (number->string year) (number->string week)))
+     (define path (build-path (user-dir username) "calendar" (number->string year) (number->string week)))
      (make-directory* path)
      (with-output-to-file (build-path path (uuid-generate))
        (thunk (writeln (hash 'description description
@@ -321,28 +331,21 @@
                              'to (date->seconds to)))))
      (redirect-to (url* user-page username))]))
 
-(define (not-logged-in req)
-  (response/xexpr
-    `(html
-       (body
-         (p "you are not logged in")
-         (a ([href "/"]) "go to index page"))))
-  )
 (define (settings-page req)
   (response/xexpr
     #:preamble #"<!DOCTYPE html>"
-    #:headers (list (cookie->header (make-cookie "reload" (number->string (random)))))
+    #:headers (list (cookie "reload" (number->string (random))))
     `(html
        ,(common-head req)
        (body
          ,@(menu req)
          (p "paste custom CSS/JS here")
          (form ([action ,(url* settings-post)] [id "form"] [method "post"])
-           (textarea ([form "form"] [name "css"] [placeholder "CSS"]) ,(read-css (logged-in? req)))
-           (textarea ([form "form"] [name "js"] [placeholder "Javascript"]) ,(read-js (logged-in? req)))
+           (textarea ([form "form"] [name "css"] [placeholder "CSS"]) ,(read-css req))
+           (textarea ([form "form"] [name "js"] [placeholder "Javascript"]) ,(read-js req))
            (input ([type "submit"]))
            )
-         (form ([action "/"]) [method "post"]
+         (form ([action "/"] [method "post"])
            (input ([type "text"]))
            )
          (p "you may need to clear your browser cache for your changes to take effect (in the future, we want to set a cookie that adds an argument to get a different stylesheet (e.g. 'GET /file/user/css?r=32'), so we do not need the user to manually clear his cache)")
@@ -356,7 +359,7 @@
     [(> (string-length js) 2048)
      (redirect-to (url* too-much-js))]
     [else
-     (define path (build-path "file" "user" (logged-in? req)))
+     (define path (build-path (user-dir (logged-in? req))))
      (make-directory* path)
      (with-output-to-file (build-path path "css") #:exists 'replace
        (thunk (displayln css)))
@@ -383,7 +386,7 @@
   (with-handlers ([exn?
                     (lambda (exn)
                       (erro+ exn))])
-    (delete-file (build-path username "calendar" (number->string year) (number->string week) uuid)))
+    (delete-file (build-path (user-dir username) "calendar" (number->string year) (number->string week) uuid)))
   (redirect-to (url index-page)))
 
 (define (invite-entry req username week year uuid)
@@ -392,7 +395,7 @@
                       (lambda (exn)
                         (erro+ exn)
                         (hash))])
-      (with-input-from-file (build-path username "calendar"
+      (with-input-from-file (build-path (user-dir username) "calendar"
                                         (number->string year)
                                         (number->string week) uuid)
                             (thunk (read)))))
@@ -403,7 +406,7 @@
   (define to-date (date->date-string to))
   (define from-time (date->time-string from))
   (define to-time (date->time-string to))
-  (trce from-date)
+  (trce+ from-date)
   (response/xexpr
     `(html
        ,(common-head req)
@@ -445,6 +448,20 @@
        (body (p "description too long (limit: 2048 characters)")
              (a ([href "/"]) "back to user")))))
 
+(define (get-user-css req)
+  (response/full
+    200 #"OK"
+    (current-seconds) #"text/css; charset=utf-8"
+    empty
+    (list (string->bytes/utf-8 (read-css req)))))
+
+(define (get-user-js req)
+  (response/full
+    200 #"OK"
+    (current-seconds) #"application/javascript; charset=utf-8"
+    empty
+    (list (string->bytes/utf-8 (read-js req)))))
+
 (define-values (dispatch* url*)
   (dispatch-rules
     (["add"]            add-entry)
@@ -465,6 +482,8 @@
 (define-values (dispatch url)
   (dispatch-rules
     (["about"]           #:method "get" about-page)
+    (["css"]             get-user-css)
+    (["js"]              get-user-js)
     (["developers"]      #:method "get" for-developers-page)
     (["login"]           #:method "post" login-page)
     (["log-out"]         #:method "get" log-out)

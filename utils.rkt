@@ -2,6 +2,7 @@
 
 (provide (all-defined-out))
 
+
 (require
   (for-syntax racket/base)
   libuuid
@@ -17,6 +18,15 @@
   web-server/servlet
   web-server/servlet-env)
 
+(define (today)
+  (define now (seconds->date (current-seconds)))
+  (string-append (~a #:align 'right #:left-pad-string "0" #:min-width 4 (number->string (date-year now))) "-"
+                 (~a #:align 'right #:left-pad-string "0" #:min-width 2 (number->string (date-month now))) "-"
+                 (~a #:align 'right #:left-pad-string "0" #:min-width 2 (number->string (date-day now)))))
+
+(define (user-dir username)
+  (build-path "user" username))
+
 (define (common-head req)
   `(head
      (meta ([charset "UTF-8"]))
@@ -24,8 +34,8 @@
      (title "Calenio")
      ,@(if (logged-in? req)
        `(
-         (link ([href ,(string-append "/file/user/" (logged-in? req) "/css")] [rel "stylesheet"] [type "text/css"]))
-         (script ([src ,(string-append "/file/user/" (logged-in? req) "/js")]))
+         (link ([href "/css"] [rel "stylesheet"] [type "text/css"]))
+         (script ([src "/js"]))
          )
         '()
      )))
@@ -52,28 +62,32 @@
   (pairfind (request-bindings req) sym))
 
 (define (correct-password? username password)
-  (with-input-from-file (build-path username "pwhash")
+  (with-input-from-file (build-path (user-dir username) "pwhash")
     (thunk (equal? (read) (sha512 (string->bytes/utf-8 password))))
   ))
 
-(define (read-css username)
+(define (read-css req)
   (with-handlers ([exn:fail:filesystem?
                     (lambda (exn)
                       (erro "unable to read file")
                       "")])
-    (file->string (build-path "file" "user" username "css")))
-  )
+    (if (logged-in? req)
+      (file->string (build-path (user-dir (logged-in? req)) "css"))
+      (file->string (build-path "settings" "default.css")))
+  ))
 
-(define (read-js username)
+(define (read-js req)
   (with-handlers ([exn:fail:filesystem?
                     (lambda (exn)
                       (erro "unable to read file")
                       "")])
-    (file->string (build-path "file" "user" username "js")))
-  )
+    (if (logged-in? req)
+      (file->string (build-path (user-dir (logged-in? req)) "js"))
+      (file->string (build-path "settings" "default.js")))
+  ))
 
 (define (create-or-fetch-session-key username)
-  (define path (build-path username "session"))
+  (define path (build-path (user-dir username) "session"))
   (cond
     [(file-exists? path)
      (with-input-from-file path
@@ -93,7 +107,7 @@
                       (erro exn)
                       #f)])
     (string->path-element username)
-    (directory-exists? username)
+    (directory-exists? (user-dir username))
   ))
 
 ;; TODO cleanse path name
@@ -103,8 +117,8 @@
                       (erro exn)
                       #f)])
     (define path-element (string->path-element username))
-    (make-directory username)
-    (with-output-to-file (build-path path-element "pwhash")
+    (make-directory* (user-dir path-element))
+    (with-output-to-file (build-path (user-dir path-element) "pwhash")
       (thunk
         (write (sha512 (string->bytes/utf-8 password)))
         ))
@@ -173,7 +187,7 @@
   (cond
     [(and username session (user-exists? username))
      (if
-       (with-input-from-file (build-path username "session")
+       (with-input-from-file (build-path (user-dir username) "session")
          (thunk (equal? (read) session)))
        username
        #f)]
