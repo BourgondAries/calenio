@@ -8,7 +8,8 @@
   libuuid
   logger
   sha
-  srfi/19
+  racket/date
+  (only-in srfi/19 date-week-number)
   racket/bool (only-in racket/date date-display-format
                                    date->seconds
                                    date*->seconds)
@@ -133,7 +134,8 @@
     (string->path-element str)))
 
 (define (seconds->datestring seconds)
-  (date->string (seconds->date seconds)))
+  (date-display-format 'iso-8601)
+  (date->string (seconds->date seconds #f) #t))
 
 (define ((entry->html username week year) con)
   (define file (first con))

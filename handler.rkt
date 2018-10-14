@@ -315,8 +315,8 @@
      (bind req from-date from-time to-date to-time)
      ;; Processing
      (warn (string-append from-date "T" from-time))
-     (define from (string->date (string-append from-date "T" from-time) "~Y-~m-~dT~H:~M"))
-     (define to (string->date (string-append to-date "T" to-time) "~Y-~m-~dT~H:~M"))
+     (define from (string->date (string-append from-date "T" from-time "Z") "~Y-~m-~dT~H:~M~z"))
+     (define to (string->date (string-append to-date "T" to-time "Z") "~Y-~m-~dT~H:~M~z"))
      (trce+ (date*->seconds to))
      (trce+ (date-week-number to 1))
      (warn from to)
@@ -327,8 +327,8 @@
      (make-directory* path)
      (with-output-to-file (build-path path (uuid-generate))
        (thunk (writeln (hash 'description description
-                             'from (date->seconds from)
-                             'to (date->seconds to)))))
+                             'from (date->seconds from #f)
+                             'to (date->seconds to #f)))))
      (redirect-to (url* user-page username))]))
 
 (define (settings-page req)
